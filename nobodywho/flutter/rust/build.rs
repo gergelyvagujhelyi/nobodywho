@@ -10,8 +10,13 @@ fn main() {
         println!("cargo:rustc-link-lib=c++");
     }
 
-    // emscripten-specific linker flags for the web bin target only
+    // emscripten-specific linker flags
     if target == "emscripten" {
+        // The lib is crate-type = ["cdylib", "rlib"] so the bin can depend on
+        // it. When the cdylib variant gets built, emscripten's default link
+        // mode expects a `main` symbol; mark it as a library instead.
+        println!("cargo:rustc-link-arg-cdylib=--no-entry");
+
         let bin = "nobodywho_flutter_web";
         // Tell emscripten to invoke wasm-bindgen on the linked .wasm,
         // which auto-exports all #[wasm_bindgen] symbols and generates JS bindings
