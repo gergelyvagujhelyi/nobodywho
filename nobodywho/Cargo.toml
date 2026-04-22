@@ -10,3 +10,11 @@ members = [
 
 # edition = "2021" implies resolver = "2".
 resolver = "2"
+
+# Patch flutter_rust_bridge with a cfg-gated `wasm_bindgen::module()` call,
+# which is unsupported in wasm-bindgen-cli's OutputMode::Emscripten. Drop this
+# patch entry once upstream PR
+# https://github.com/fzyzcjy/flutter_rust_bridge/pull/3062 lands and a new
+# release ships.
+[patch.crates-io]
+flutter_rust_bridge = { git = "https://github.com/gergelyvagujhelyi/flutter_rust_bridge", branch = "fix/emscripten-worker-pool-module-cfg-gate" }
