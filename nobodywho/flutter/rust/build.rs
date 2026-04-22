@@ -26,14 +26,16 @@ fn main() {
         // Wrap output in a module factory function
         println!("cargo:rustc-link-arg-bin={bin}=-sMODULARIZE=1");
         println!("cargo:rustc-link-arg-bin={bin}=-sEXPORT_NAME='createNobodyWhoModule'");
-        // Export externref intrinsics required by wasm-bindgen's externref transform.
-        // Rust 1.82+ enables reference-types by default for wasm32 targets; wasm-bindgen
-        // compiles these functions (gated on wbg_reference_types cfg) but wasm-ld may
-        // dead-code-eliminate them since nothing calls them directly in the Rust code.
-        // wasm-bindgen-cli needs them exported so it can rewrite externref operations.
-        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--export=__externref_table_alloc");
-        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--export=__externref_table_dealloc");
-        println!("cargo:rustc-link-arg-bin={bin}=-Wl,--export=__externref_drop_slice");
+        // emcc auto-populates EXPORTED_FUNCTIONS with every wasm-bindgen-related
+        // symbol it discovers in the input .o files (describe functions, externref
+        // intrinsics, etc.), then errors if any listed symbol isn't actually
+        // defined. On wasm32-unknown-emscripten reference-types isn't enabled by
+        // default, so wasm-bindgen's externref.rs (gated on `cfg(wbg_reference_types)`)
+        // is not compiled and `__externref_{drop_slice,table_alloc,table_dealloc}`
+        // don't exist. Downgrade the missing-exported-symbol check from error to
+        // warning — the exports are speculative and harmless when the target doesn't
+        // use them.
+        println!("cargo:rustc-link-arg-bin={bin}=-Wno-undefined");
     }
 
     if std::env::var("NOBODYWHO_SKIP_CODEGEN").is_ok() {
