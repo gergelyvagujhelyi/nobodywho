@@ -8,7 +8,9 @@ let
 in
 pkgs.mkShell {
   env = {
-    LIBCLANG_PATH = "${pkgs.libclang.lib}/lib/libclang.so";
+    # Point at the directory, not a specific file — bindgen's libclang-sys
+    # picks libclang.so on Linux or libclang.dylib on macOS from here.
+    LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
     LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
       pkgs.vulkan-loader
       pkgs.gcc.cc.lib
