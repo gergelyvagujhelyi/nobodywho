@@ -39,18 +39,24 @@
             overlays = [
               # Override emscripten with walkingeyerobot's fork that supports -sWASM_BINDGEN
               (final: prev: {
-                # wasm-bindgen-cli 0.2.117 — emscripten support merged upstream in 0.2.115
+                # wasm-bindgen-cli 0.2.118 — fixes a panic in `get_function_table_entry`
+                # for large wasm modules. rustc 1.94+ / lld emit element-segment
+                # offsets as `global.get $__table_base` (ConstExpr::Global) or as
+                # `global.get $__table_base; i32.const K; i32.add` (ConstExpr::Extended)
+                # rather than `ConstExpr::Value(I32(_))`. 0.2.117 silently skipped
+                # those segments and panicked at outgoing.rs:257 ("failed to find
+                # <idx> in function table"). 0.2.118 added a small const-expr evaluator.
                 # Must match the wasm-bindgen crate version resolved by Cargo.
                 wasm-bindgen-cli = prev.buildWasmBindgenCli rec {
                   src = prev.fetchCrate {
                     pname = "wasm-bindgen-cli";
-                    version = "0.2.117";
-                    hash = "sha256-vtDQXL8FSgdutqXG7/rBUWgrYCtzdmeVQQkWkjasvZU=";
+                    version = "0.2.118";
+                    hash = "sha256-ve783oYH0TGv8Z8lIPdGjItzeLDQLOT5uv/jbFOlZpI=";
                   };
                   cargoDeps = prev.rustPlatform.fetchCargoVendor {
                     inherit src;
                     inherit (src) pname version;
-                    hash = "sha256-eKe7uwneUYxejSbG/1hKqg6bSmtL0KQ9ojlazeqTi88=";
+                    hash = "sha256-EYDfuBlH3zmTxACBL+sjicRna84CvoesKSQVcYiG9P0=";
                   };
                 };
                 emscripten = prev.emscripten.overrideAttrs (old: {
