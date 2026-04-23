@@ -3,14 +3,16 @@
 # loader, which expects wasm-pack's `--target no-modules` layout under
 # `web/pkg/`:
 #
-#   web/pkg/nobodywho_flutter.js      ← shim (in this repo) + Emscripten glue
+#   web/pkg/nobodywho_flutter.js      ← shim + Emscripten glue (generated)
 #   web/pkg/nobodywho_flutter_bg.wasm ← renamed copy of the Rust-built .wasm
 #
-# The shim file in-tree only contains the adapter; this script appends the
-# generated Emscripten loader after the `/* === EMSCRIPTEN GLUE === */` marker
-# and copies the wasm to its FRB-expected name. Run it any time the Rust crate
-# is rebuilt for web (typically as part of `flutter build web` wiring, or
-# manually during development).
+# Source-controlled inputs:
+#   web/pkg/nobodywho_flutter.shim.js ← adapter wrapping createNobodyWhoModule
+#
+# The shim file in-tree is the stable source-of-truth; this script
+# concatenates it with the freshly-built Emscripten loader (after the
+# shim's `/* === EMSCRIPTEN GLUE === */` marker line) into the generated
+# `nobodywho_flutter.js`. Run after any Rust-for-web rebuild.
 #
 # Usage:
 #   tool/prepare_web_assets.sh [debug|release]
@@ -29,6 +31,7 @@ SRC_WASM="${WASM_TARGET_DIR}/nobodywho_flutter_web.wasm"
 
 PKG_DIR="${PLUGIN_DIR}/web/pkg"
 EXAMPLE_PKG_DIR="${PLUGIN_DIR}/example/web/pkg"
+SHIM_JS="${PKG_DIR}/nobodywho_flutter.shim.js"
 OUT_JS="${PKG_DIR}/nobodywho_flutter.js"
 OUT_WASM="${PKG_DIR}/nobodywho_flutter_bg.wasm"
 
@@ -43,17 +46,22 @@ fi
 
 mkdir -p "${PKG_DIR}"
 
-# Drop the Emscripten glue after the shim's marker line. The shim file is
-# source-controlled; this script regenerates only the portion below the
-# marker. We write to a temp file and swap so the target stays atomically
-# valid even if the script is killed mid-run.
+if [[ ! -f "${SHIM_JS}" ]]; then
+  echo "error: shim source not found at ${SHIM_JS}." >&2
+  echo "       this file is source-controlled — make sure you're on a" >&2
+  echo "       checkout of the nobodywho wasm branch with the FRB shim" >&2
+  echo "       committed alongside the example app." >&2
+  exit 1
+fi
+
+# Concatenate the source-controlled shim and the freshly-built Emscripten
+# loader into the generated `.js` Flutter serves. Write to a temp file and
+# swap so the target stays atomically valid even if the script is killed
+# mid-run. The generated file is `.gitignore`d (see `web/pkg/.gitignore`).
 TMP_JS="$(mktemp "${OUT_JS}.XXXXXX")"
 trap 'rm -f "${TMP_JS}"' EXIT
 
-awk 'BEGIN { keep=1 }
-     /^\/\* === EMSCRIPTEN GLUE ===/ { print; keep=0; next }
-     keep { print }' "${OUT_JS}" > "${TMP_JS}"
-
+cat "${SHIM_JS}" > "${TMP_JS}"
 {
   echo ""
   echo "/* --- begin generated Emscripten loader (${PROFILE}) --- */"
