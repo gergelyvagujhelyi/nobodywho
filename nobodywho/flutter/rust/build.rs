@@ -36,6 +36,17 @@ fn main() {
         // warning — the exports are speculative and harmless when the target doesn't
         // use them.
         println!("cargo:rustc-link-arg-bin={bin}=-Wno-undefined");
+        // Clamp emcc's link-time optimisation level so wasm-opt doesn't run.
+        // At -O2/-O3, emcc runs binaryen/wasm-opt with aggressive DCE that
+        // strips the `__wbindgen_start` export and every
+        // `__wbindgen_describe_*` function wasm-bindgen-cli inserts
+        // post-link (those get added AFTER wasm-ld by wasm-bindgen, so the
+        // normal "keep named exports" logic doesn't protect them against
+        // emcc's own later optimizer pass). `should_run_binaryen_optimizer`
+        // triggers at OPT_LEVEL >= 2, so -O1 keeps Rust-side optimisation
+        // (applied during rustc's own codegen) while skipping the wasm-opt
+        // pass at link time. See emscripten tools/link.py:302.
+        println!("cargo:rustc-link-arg-bin={bin}=-O1");
     }
 
     if std::env::var("NOBODYWHO_SKIP_CODEGEN").is_ok() {
