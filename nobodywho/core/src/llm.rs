@@ -491,6 +491,17 @@ pub(crate) struct WorkerGuard<T> {
     pub(crate) msg_tx: Option<std::sync::mpsc::Sender<T>>,
     join_handle: Option<std::thread::JoinHandle<()>>,
     should_stop: Option<Arc<AtomicBool>>,
+    // On `wasm32-unknown-emscripten` without pthreads there is no real thread
+    // to spawn, so callers that want to work on that target skip the mpsc
+    // channel entirely and use `new_inline` instead. The worker loop body is
+    // stored as a closure captured with its mutable state; each `send(msg)`
+    // invokes it synchronously on the calling task. This blocks until
+    // processing (including all token emissions) completes — the only option
+    // when a single-threaded wasm runtime can't hand work off elsewhere.
+    // The RefCell gives us `&mut` access through the shared guard; on
+    // single-threaded wasm it can never be reentered so the borrow is safe.
+    #[cfg(target_arch = "wasm32")]
+    inline: std::cell::RefCell<Option<Box<dyn FnMut(T)>>>,
 }
 
 impl<T> WorkerGuard<T> {
@@ -503,12 +514,62 @@ impl<T> WorkerGuard<T> {
             msg_tx: Some(msg_tx),
             join_handle: Some(join_handle),
             should_stop,
+            #[cfg(target_arch = "wasm32")]
+            inline: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// Wasm-only: construct a guard whose `send` runs the worker loop body
+    /// inline against the captured state, rather than dispatching to a
+    /// background thread. See the type-level comment on `WorkerGuard` for
+    /// why this exists.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn new_inline(
+        process: impl FnMut(T) + 'static,
+        should_stop: Option<Arc<AtomicBool>>,
+    ) -> Self {
+        Self {
+            msg_tx: None,
+            join_handle: None,
+            should_stop,
+            inline: std::cell::RefCell::new(Some(Box::new(process))),
+        }
+    }
+
+    /// Wasm-only: guard for a worker that failed to initialise. `send` will
+    /// always return `false`, matching the native "thread already exited"
+    /// semantics.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn new_dead(should_stop: Option<Arc<AtomicBool>>) -> Self {
+        Self {
+            msg_tx: None,
+            join_handle: None,
+            should_stop,
+            inline: std::cell::RefCell::new(None),
         }
     }
 
     /// Send a message to the worker. Returns false if the worker is gone.
     pub(crate) fn send(&self, msg: T) -> bool {
-        self.msg_tx.as_ref().is_some_and(|tx| tx.send(msg).is_ok())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.msg_tx.as_ref().is_some_and(|tx| tx.send(msg).is_ok())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Take the closure out for the duration of the call so
+            // nothing inside `process(msg)` can re-borrow through us
+            // (e.g. if the body loops back through `ChatHandleAsync`).
+            let mut slot = self.inline.borrow_mut();
+            if let Some(mut f) = slot.take() {
+                drop(slot);
+                f(msg);
+                *self.inline.borrow_mut() = Some(f);
+                true
+            } else {
+                false
+            }
+        }
     }
 
     /// Signal the worker to stop mid-generation (no-op if no stop flag).
@@ -518,6 +579,17 @@ impl<T> WorkerGuard<T> {
         }
     }
 }
+
+// Wasm is single-threaded, so the `RefCell<…FnMut…>` field we carry on
+// that target is in practice never accessed from more than one thread.
+// The Send/Sync bounds below restore the behaviour that holds on native
+// (where the type is Send+Sync because the mpsc sender is), letting
+// downstream wrappers — notably flutter_rust_bridge's `RustOpaque` —
+// compile without contortions for the web target.
+#[cfg(target_arch = "wasm32")]
+unsafe impl<T: Send> Send for WorkerGuard<T> {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl<T: Send> Sync for WorkerGuard<T> {}
 
 impl<T> Drop for WorkerGuard<T> {
     fn drop(&mut self) {

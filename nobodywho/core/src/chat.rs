@@ -299,30 +299,82 @@ pub struct ChatHandle {
 impl ChatHandle {
     /// Create a new chat handle directly. Consider using [`ChatBuilder`] for a more ergonomic API.
     pub fn new(model: Arc<llm::Model>, config: ChatConfig) -> Self {
-        let (msg_tx, msg_rx) = std::sync::mpsc::channel();
-
         let should_stop = Arc::new(AtomicBool::new(false));
         let should_stop_clone = Arc::clone(&should_stop);
 
-        let join_handle = std::thread::spawn(move || {
-            let worker = Worker::new_chat_worker(&model, config, should_stop_clone);
-            let mut worker_state = match worker {
-                Ok(worker_state) => worker_state,
-                Err(errmsg) => {
-                    return error!("Could not set up the worker initial state: {errmsg}")
-                }
-            };
+        #[cfg(not(target_arch = "wasm32"))]
+        let guard = {
+            let (msg_tx, msg_rx) = std::sync::mpsc::channel();
+            let join_handle = std::thread::spawn(move || {
+                let worker = Worker::new_chat_worker(&model, config, should_stop_clone);
+                let mut worker_state = match worker {
+                    Ok(worker_state) => worker_state,
+                    Err(errmsg) => {
+                        return error!("Could not set up the worker initial state: {errmsg}")
+                    }
+                };
 
-            while let Ok(msg) = msg_rx.recv() {
-                if let Err(e) = process_worker_msg(&mut worker_state, msg) {
-                    return error!("Worker crashed: {e}");
+                while let Ok(msg) = msg_rx.recv() {
+                    if let Err(e) = process_worker_msg(&mut worker_state, msg) {
+                        return error!("Worker crashed: {e}");
+                    }
+                }
+            });
+            WorkerGuard::new(msg_tx, join_handle, Some(should_stop))
+        };
+
+        // On wasm32 Rust's `std::thread::spawn` panics (`"failed to spawn
+        // thread"`) — Emscripten without pthreads has no threads. Run the
+        // worker loop inline instead: initialise the worker state up front,
+        // then hand `process_worker_msg` to `WorkerGuard::new_inline` so each
+        // `send(msg)` dispatches synchronously on the calling task. The only
+        // user-visible difference is that `ask(...).next_token()` won't
+        // interleave with the caller's work — every token is produced
+        // before `send` returns — but a single-threaded wasm runtime can't
+        // do better without SharedArrayBuffer + Web Workers (which in turn
+        // needs `wasm_bindgen::module()` to work in OutputMode::Emscripten,
+        // currently an upstream gap).
+        #[cfg(target_arch = "wasm32")]
+        let guard = {
+            // Self-referential capture: the closure we hand to
+            // `new_inline` owns both the `Arc<Model>` and a `Worker<'_>`
+            // that borrows from it. Rust's borrow checker can't express
+            // "these two are fate-bound inside this closure", so we
+            // transmute the Worker's lifetime to `'static`. Sound
+            // because:
+            //   - wasm is single-threaded; no races.
+            //   - `model_kept_alive` lives inside the same closure that
+            //     holds the Worker, so the underlying `LlamaModel`
+            //     outlives every use of the Worker.
+            //   - The closure (and transitively the Arc + Worker) is
+            //     dropped in field order on `WorkerGuard`'s own drop:
+            //     Worker first, Arc after — correct teardown.
+            let model_kept_alive = Arc::clone(&model);
+            match Worker::new_chat_worker(&model, config, should_stop_clone) {
+                Ok(worker_state) => {
+                    let mut worker_state: Worker<'static, ChatWorker> =
+                        unsafe { std::mem::transmute(worker_state) };
+                    WorkerGuard::new_inline(
+                        move |msg: ChatMsg| {
+                            // Touch `model_kept_alive` so the `move`
+                            // closure captures it, keeping the Arc
+                            // alive alongside `worker_state`.
+                            let _ = &model_kept_alive;
+                            if let Err(e) = process_worker_msg(&mut worker_state, msg) {
+                                error!("Worker crashed: {e}");
+                            }
+                        },
+                        Some(should_stop),
+                    )
+                }
+                Err(errmsg) => {
+                    error!("Could not set up the worker initial state: {errmsg}");
+                    WorkerGuard::new_dead(Some(should_stop))
                 }
             }
-        });
+        };
 
-        Self {
-            guard: WorkerGuard::new(msg_tx, join_handle, Some(should_stop)),
-        }
+        Self { guard }
     }
 
     /// Send a message and get a tokio channel
@@ -568,29 +620,58 @@ pub struct ChatHandleAsync {
 impl ChatHandleAsync {
     /// Create a new chat handle directly. Consider using [`ChatBuilder`] for a more ergonomic API.
     pub fn new(model: Arc<llm::Model>, config: ChatConfig) -> Self {
-        let (msg_tx, msg_rx) = std::sync::mpsc::channel();
-
         let should_stop = Arc::new(AtomicBool::new(false));
         let should_stop_clone = Arc::clone(&should_stop);
 
-        let join_handle = std::thread::spawn(move || {
-            let worker = Worker::new_chat_worker(&model, config, should_stop_clone);
-            let mut worker_state = match worker {
-                Ok(worker_state) => worker_state,
-                Err(errmsg) => {
-                    return error!("Could not set up the worker initial state: {errmsg}")
-                }
-            };
+        // See `ChatHandle::new` for the wasm rationale; same trick here.
+        #[cfg(not(target_arch = "wasm32"))]
+        let guard = {
+            let (msg_tx, msg_rx) = std::sync::mpsc::channel();
+            let join_handle = std::thread::spawn(move || {
+                let worker = Worker::new_chat_worker(&model, config, should_stop_clone);
+                let mut worker_state = match worker {
+                    Ok(worker_state) => worker_state,
+                    Err(errmsg) => {
+                        return error!("Could not set up the worker initial state: {errmsg}")
+                    }
+                };
 
-            while let Ok(msg) = msg_rx.recv() {
-                if let Err(e) = process_worker_msg(&mut worker_state, msg) {
-                    return error!("Worker crashed: {e}");
+                while let Ok(msg) = msg_rx.recv() {
+                    if let Err(e) = process_worker_msg(&mut worker_state, msg) {
+                        return error!("Worker crashed: {e}");
+                    }
+                }
+            });
+            WorkerGuard::new(msg_tx, join_handle, Some(should_stop))
+        };
+
+        // See `ChatHandle::new` for the `transmute` rationale.
+        #[cfg(target_arch = "wasm32")]
+        let guard = {
+            let model_kept_alive = Arc::clone(&model);
+            match Worker::new_chat_worker(&model, config, should_stop_clone) {
+                Ok(worker_state) => {
+                    let mut worker_state: Worker<'static, ChatWorker> =
+                        unsafe { std::mem::transmute(worker_state) };
+                    WorkerGuard::new_inline(
+                        move |msg: ChatMsg| {
+                            let _ = &model_kept_alive;
+                            if let Err(e) = process_worker_msg(&mut worker_state, msg) {
+                                error!("Worker crashed: {e}");
+                            }
+                        },
+                        Some(should_stop),
+                    )
+                }
+                Err(errmsg) => {
+                    error!("Could not set up the worker initial state: {errmsg}");
+                    WorkerGuard::new_dead(Some(should_stop))
                 }
             }
-        });
+        };
 
         Self {
-            guard: Arc::new(WorkerGuard::new(msg_tx, join_handle, Some(should_stop))),
+            guard: Arc::new(guard),
         }
     }
 
