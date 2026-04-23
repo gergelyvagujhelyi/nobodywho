@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FRB shim smoke test</title>
+  <style>
+    body { font-family: ui-monospace, monospace; margin: 2rem; max-width: 80ch; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; }
+    .ok { color: #0a7d0a; font-weight: bold; }
+    .err { color: #b00020; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>FRB shim smoke test</h1>
+  <p>Exercises the full flutter_rust_bridge loader path:
+     script load → global <code>wasm_bindgen</code> is callable →
+     <code>wasm_bindgen({module_or_path: …})</code> instantiates →
+     <code>wasm_bindgen.frb_get_rust_content_hash()</code> (un-prefixed,
+     wasm-pack convention) returns the expected integer.</p>
+  <pre id="out">initialising…</pre>
+  <script src="./nobodywho_flutter.js"></script>
+  <script>
+    const out = document.getElementById('out');
+    out.textContent = '';
+    const log = (msg, cls) => {
+      const line = document.createElement('div');
+      if (cls) line.className = cls;
+      line.textContent = msg;
+      out.appendChild(line);
+    };
+
+    log('[1/5] typeof wasm_bindgen (should be function): ' + typeof wasm_bindgen);
+
+    wasm_bindgen({module_or_path: './nobodywho_flutter_bg.wasm'}).then((mod) => {
+      log('[2/5] wasm_bindgen(...) resolved', 'ok');
+
+      const underscored = typeof wasm_bindgen._frb_get_rust_content_hash;
+      log('[3/5] wasm_bindgen._frb_get_rust_content_hash type (emcc form): ' + underscored);
+
+      const unprefixed = typeof wasm_bindgen.frb_get_rust_content_hash;
+      log('[4/5] wasm_bindgen.frb_get_rust_content_hash type (wasm-pack form): ' + unprefixed);
+
+      if (unprefixed !== 'function') {
+        log('[5/5] FAIL — FRB-convention name not exposed on wasm_bindgen', 'err');
+        return;
+      }
+
+      const hash = wasm_bindgen.frb_get_rust_content_hash();
+      const expected = -1621459427;
+      const ok = hash === expected;
+      log('[5/5] wasm_bindgen.frb_get_rust_content_hash() → ' + hash +
+          (ok ? ' (matches expected ' + expected + ')' : ' (expected ' + expected + ')'),
+          ok ? 'ok' : 'err');
+    }).catch((e) => {
+      log('[fatal] ' + e, 'err');
+      if (e.stack) log(e.stack);
+    });
+  </script>
+</body>
+</html>
