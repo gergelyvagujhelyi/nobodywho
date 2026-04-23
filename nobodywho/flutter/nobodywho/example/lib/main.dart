@@ -27,6 +27,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:nobodywho/nobodywho.dart' as nobodywho;
 
@@ -235,9 +236,20 @@ class _DemoPageState extends State<DemoPage> {
       _history.add(_ChatMessage('assistant', ''));
       _userInputCtrl.clear();
       _phase = _Phase.generating;
-      _status = 'Generating…';
+      _status = 'Generating… (UI will freeze while the single-threaded wasm '
+          'worker runs inference — see ChatHandleAsync wasm32 branch)';
     });
     _scrollChatToBottom();
+
+    // Give Flutter at least one frame to paint the "Generating…" state
+    // before `ask(…)` kicks off the synchronous wasm inference, which
+    // blocks the main task until completion. Two frames are belt-and-
+    // suspenders in case the layout needed another pass (AppBar /
+    // SafeArea insets etc.). Without this the banner and spinner don't
+    // render until the whole answer is already in, which looks like a
+    // full app freeze to the user.
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(Duration.zero);
 
     try {
       final stream = chat.ask(text);
@@ -455,16 +467,33 @@ class _DemoPageState extends State<DemoPage> {
         const SizedBox(height: 8),
         Row(
           children: [
+            // Wrap the TextField in a Focus+KeyboardListener so Enter
+            // submits even on Flutter web (where `onSubmitted` is sometimes
+            // not triggered depending on IME / focus state). Shift+Enter
+            // still inserts a newline for the multiline case.
             Expanded(
-              child: TextField(
-                controller: _userInputCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'Type a message…',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.enter &&
+                      !HardwareKeyboard.instance.isShiftPressed &&
+                      canChat) {
+                    _sendMessage();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TextField(
+                  controller: _userInputCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Type a message…',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  enabled: canChat,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendMessage(),
                 ),
-                enabled: canChat,
-                onSubmitted: (_) => _sendMessage(),
               ),
             ),
             const SizedBox(width: 8),
@@ -480,6 +509,16 @@ class _DemoPageState extends State<DemoPage> {
 
   Widget _buildMessageBubble(_ChatMessage m) {
     final isUser = m.role == 'user';
+    // If this is the *last* bubble and it's empty while we're generating,
+    // fill it with a spinner + status text instead of a literal '…'. That
+    // way the user has something to look at during the inline wasm
+    // worker's blocking run, even if setState updates after this frame
+    // won't land until the worker returns.
+    final isActiveAssistant = !isUser &&
+        m.text.isEmpty &&
+        _phase == _Phase.generating &&
+        identical(m, _history.isNotEmpty ? _history.last : null);
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -508,7 +547,21 @@ class _DemoPageState extends State<DemoPage> {
               ),
             ),
             const SizedBox(height: 2),
-            SelectableText(m.text.isEmpty ? '…' : m.text),
+            if (isActiveAssistant)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text('thinking…'),
+                ],
+              )
+            else
+              SelectableText(m.text.isEmpty ? '…' : m.text),
           ],
         ),
       ),
