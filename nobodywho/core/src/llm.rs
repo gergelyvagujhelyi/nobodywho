@@ -74,10 +74,16 @@ pub fn has_gpu_backend() -> bool {
     false
 }
 
-#[tracing::instrument(level = "info")]
 /// Crude hash to generate a unique-ish VFS filename for a model.
 /// Samples 4KB from the start, middle, and end of the data plus the total
 /// length, to avoid hashing the entire file (which may be multiple GB).
+//
+// `skip(data)` is load-bearing: without it `tracing::instrument` debug-formats
+// the whole `&[u8]` into the span's fields (every byte as decimal with
+// commas). For a ~300 MB GGUF that builds a multi-gigabyte `String`, whose
+// backing `Vec` overflows the 2 GB `isize` limit on `wasm32` and panics via
+// `raw_vec::capacity_overflow`. Manually surface the length instead.
+#[tracing::instrument(level = "info", skip(data), fields(data_len = data.len()))]
 fn unique_filename_for_model(data: &[u8]) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
