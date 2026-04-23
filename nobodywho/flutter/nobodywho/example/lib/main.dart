@@ -166,6 +166,14 @@ class _DemoPageState extends State<DemoPage> {
     try {
       // Streamed fetch so the progress bar advances byte by byte rather
       // than sitting at 0 then jumping to 100.
+      //
+      // Accumulate into a `BytesBuilder`, not a `List<int>`. On Flutter
+      // web a plain `List<int>` is backed by a JS Array of 64-bit doubles
+      // (one per element), so a 272 MB GGUF balloons to ~2.2 GB of JS
+      // heap _before_ the bytes even reach Rust — Chrome kills the tab
+      // for OOM long before `Model.fromBytes` sees anything.
+      // `BytesBuilder` is byte-packed (Uint8List-backed) and turns the
+      // accumulation into a single O(n) copy at the end.
       final request = http.Request('GET', Uri.parse(url));
       final response = await http.Client().send(request);
       if (response.statusCode != 200) {
@@ -174,16 +182,16 @@ class _DemoPageState extends State<DemoPage> {
       final total = response.contentLength;
       setState(() => _totalBytes = total);
 
-      final chunks = <int>[];
+      final builder = BytesBuilder(copy: false);
       await for (final chunk in response.stream) {
-        chunks.addAll(chunk);
-        _downloadedBytes = chunks.length;
+        builder.add(chunk);
+        _downloadedBytes = builder.length;
         if (total != null && total > 0) {
-          _downloadProgress = chunks.length / total;
+          _downloadProgress = builder.length / total;
         }
         if (mounted) setState(() {});
       }
-      final bytes = Uint8List.fromList(chunks);
+      final bytes = builder.toBytes();
       setState(() {
         _status =
             'Fetched ${_fmtBytes(bytes.lengthInBytes)}. Calling Model.fromBytes …';
