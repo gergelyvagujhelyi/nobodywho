@@ -35,6 +35,11 @@ dev_dependencies:
   test: ^1.25.6
   freezed: ^3.2.3
   build_runner: ^2.4.13
+  # `test/load_model_web.dart` fetches the GGUF over HTTP for the web
+  # integration test. `package:http` is the simplest cross-platform way to
+  # do that from Dart; pulled in as a dev-dep so it doesn't leak into the
+  # published plugin's runtime deps.
+  http: ^1.0.0
 
 flutter:
   plugin:

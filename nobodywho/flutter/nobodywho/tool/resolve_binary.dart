@@ -41,7 +41,12 @@ const platformMappings = {
   'web': {
     'wasm32': {
       'triple': 'wasm32-unknown-emscripten',
-      'lib': 'nobodywho_flutter.js',
+      // The bin target emits `nobodywho_flutter_web.js` + matching `.wasm`;
+      // the `_web` suffix is the `[[bin]] name` in
+      // `nobodywho/flutter/rust/Cargo.toml` and cannot be renamed trivially
+      // without also updating the `cargo:rustc-link-arg-bin` flags keyed on
+      // that same name in `flutter/rust/build.rs`.
+      'lib': 'nobodywho_flutter_web.js',
     },
   },
 };
