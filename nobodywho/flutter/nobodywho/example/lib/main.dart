@@ -70,7 +70,11 @@ class _DemoPageState extends State<DemoPage> {
   // `example/web/models/model.gguf`. For a remote model, paste a
   // HuggingFace `resolve/main/...gguf` URL.
   final _modelUrlCtrl = TextEditingController(text: 'models/model.gguf');
-  final _contextSizeCtrl = TextEditingController(text: '2048');
+  // 512 fits comfortably under the 4 GB wasm memory cap alongside a
+  // ~500 MB Q4 GGUF + MEMFS double-buffering + llama.cpp scratch. 2048
+  // is the typical chat default on native but blows the ceiling on web
+  // for models in this size class.
+  final _contextSizeCtrl = TextEditingController(text: '512');
   final _systemPromptCtrl =
       TextEditingController(text: 'You are a helpful assistant.');
   final _userInputCtrl = TextEditingController();
