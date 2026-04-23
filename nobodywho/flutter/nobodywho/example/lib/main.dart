@@ -241,15 +241,18 @@ class _DemoPageState extends State<DemoPage> {
     });
     _scrollChatToBottom();
 
-    // Give Flutter at least one frame to paint the "Generating…" state
-    // before `ask(…)` kicks off the synchronous wasm inference, which
-    // blocks the main task until completion. Two frames are belt-and-
-    // suspenders in case the layout needed another pass (AppBar /
-    // SafeArea insets etc.). Without this the banner and spinner don't
-    // render until the whole answer is already in, which looks like a
-    // full app freeze to the user.
+    // Give Flutter's render pipeline real wall-clock time to schedule,
+    // build, lay out and *paint* the "Generating…" state before we hand
+    // control to the wasm worker, which will then block the main task
+    // for the whole inference run. A single `endOfFrame` await isn't
+    // enough on Flutter web — the browser needs to tick forward for the
+    // compositor to actually composite the new frame. A small real-time
+    // sleep (50 ms) is cheap next to a multi-second inference and is
+    // the only reliable way to make the spinner land on-screen before
+    // the freeze.
     await WidgetsBinding.instance.endOfFrame;
-    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await WidgetsBinding.instance.endOfFrame;
 
     try {
       final stream = chat.ask(text);
