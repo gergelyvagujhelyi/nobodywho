@@ -16,6 +16,10 @@ dependencies:
   # the wasm and `flutter run -d chrome` here picks them up immediately.
   nobodywho:
     path: ../
+  # Fetch the staged GGUF bytes out of `web/models/model.gguf` via plain
+  # HTTP so the same code runs identically under `flutter run -d chrome`,
+  # `flutter build web` + a static server, and any production browser.
+  http: ^1.0.0
 
 dev_dependencies:
   flutter_test:

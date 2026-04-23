@@ -1,0 +1,4 @@
+# GGUF model bytes fetched on demand by developer for web smoke testing —
+# not source-controlled (typical tiny models are 300–500 MB). See the
+# example's README for the expected filename / download URL.
+*.gguf

@@ -21,8 +21,14 @@ fn main() {
         // Tell emscripten to invoke wasm-bindgen on the linked .wasm,
         // which auto-exports all #[wasm_bindgen] symbols and generates JS bindings
         println!("cargo:rustc-link-arg-bin={bin}=-sWASM_BINDGEN");
-        // Allow memory growth for large models
+        // Allow memory growth for large models, and bump the ceiling from
+        // Emscripten's default (2 GB) to 4 GB — the hard cap for wasm on
+        // 32-bit browser tabs. Loading a ~500 MB GGUF needs the raw bytes
+        // plus llama.cpp's working set (context KV cache, scratch buffers),
+        // which blows past 2 GB when the default `ALLOW_MEMORY_GROWTH`
+        // ceiling is hit by `rust_alloc_error_handler`.
         println!("cargo:rustc-link-arg-bin={bin}=-sALLOW_MEMORY_GROWTH=1");
+        println!("cargo:rustc-link-arg-bin={bin}=-sMAXIMUM_MEMORY=4GB");
         // Wrap output in a module factory function
         println!("cargo:rustc-link-arg-bin={bin}=-sMODULARIZE=1");
         println!("cargo:rustc-link-arg-bin={bin}=-sEXPORT_NAME='createNobodyWhoModule'");
