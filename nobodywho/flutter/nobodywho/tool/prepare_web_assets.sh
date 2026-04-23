@@ -28,6 +28,7 @@ SRC_JS="${WASM_TARGET_DIR}/nobodywho_flutter_web.js"
 SRC_WASM="${WASM_TARGET_DIR}/nobodywho_flutter_web.wasm"
 
 PKG_DIR="${PLUGIN_DIR}/web/pkg"
+EXAMPLE_PKG_DIR="${PLUGIN_DIR}/example/web/pkg"
 OUT_JS="${PKG_DIR}/nobodywho_flutter.js"
 OUT_WASM="${PKG_DIR}/nobodywho_flutter_bg.wasm"
 
@@ -65,6 +66,28 @@ mv "${TMP_JS}" "${OUT_JS}"
 trap - EXIT
 
 cp "${SRC_WASM}" "${OUT_WASM}"
+# Emscripten's generated glue has the wasm filename baked in as
+# `nobodywho_flutter_web.wasm` (from the Cargo `[[bin]] name`) and eagerly
+# fetches it at script-load time — before the factory is invoked, so before
+# our `locateFile` override has a chance to rewrite the URL. Staging a copy
+# under that exact name in the same directory satisfies that early fetch;
+# FRB's later `wasm_bindgen({module_or_path: 'pkg/<stem>_bg.wasm'})` call
+# still goes through `locateFile` and uses the canonical `_bg.wasm` copy.
+cp "${SRC_WASM}" "${PKG_DIR}/nobodywho_flutter_web.wasm"
 
 echo "prepare-web-assets: wrote ${OUT_JS} ($(wc -c < "${OUT_JS}" | tr -d ' ') bytes)"
 echo "prepare-web-assets: wrote ${OUT_WASM} ($(wc -c < "${OUT_WASM}" | tr -d ' ') bytes)"
+echo "prepare-web-assets: wrote ${PKG_DIR}/nobodywho_flutter_web.wasm (alias for emcc early fetch)"
+
+# Flutter doesn't copy a plugin's own `web/` directory into the final build
+# output of a consuming app — it only merges the app's own `web/`. So also
+# stage the same pair under the example app's `web/pkg/` (if present) so
+# `flutter run -d chrome` / `flutter build web` from the example picks them
+# up automatically.
+if [[ -d "${PLUGIN_DIR}/example/web" ]]; then
+  mkdir -p "${EXAMPLE_PKG_DIR}"
+  cp "${OUT_JS}" "${EXAMPLE_PKG_DIR}/nobodywho_flutter.js"
+  cp "${OUT_WASM}" "${EXAMPLE_PKG_DIR}/nobodywho_flutter_bg.wasm"
+  cp "${OUT_WASM}" "${EXAMPLE_PKG_DIR}/nobodywho_flutter_web.wasm"
+  echo "prepare-web-assets: also staged under ${EXAMPLE_PKG_DIR}/"
+fi

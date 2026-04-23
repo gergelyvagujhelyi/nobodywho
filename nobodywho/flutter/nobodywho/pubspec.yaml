@@ -54,5 +54,10 @@ flutter:
         ffiPlugin: true
       windows:
         ffiPlugin: true
-      web:
-        pluginClass: none
+      # No `web:` entry: this plugin targets web via flutter_rust_bridge's
+      # runtime wasm loader (frb_dart/.../wasm_module/_web.dart) rather
+      # than Flutter's plugin-platform machinery. Declaring `web:
+      # pluginClass: none` here previously caused `flutter build web` to
+      # fail with "missing required field `fileName`". Apps consuming this
+      # plugin on web must copy `web/pkg/*` into their own `web/pkg/` tree
+      # — see `tool/prepare_web_assets.sh` for the convention.

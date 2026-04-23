@@ -1,0 +1,7 @@
+# These are copies of the plugin's own web/pkg/ assets. Flutter doesn't
+# automatically pull a plugin's `web/` into the example's build output,
+# so `tool/prepare_web_assets.sh` stages the pair here too. Keep both out
+# of git — they're regenerated from the Rust build.
+nobodywho_flutter.js
+nobodywho_flutter_bg.wasm
+nobodywho_flutter_web.wasm

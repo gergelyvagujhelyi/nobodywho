@@ -42,13 +42,29 @@
         'nobodywho_flutter shim: expected globalScope.' + FACTORY +
         ' to be defined by the inlined Emscripten glue'));
     }
-    return factory({
-      // Route Emscripten's .wasm lookup through the path FRB sent us.
-      locateFile: function (name) {
-        if (name && name.endsWith('.wasm') && moduleOrPath) return moduleOrPath;
-        return name;
-      },
-    }).then(function (mod) {
+    // Pre-fetch the wasm and hand the bytes to Emscripten as `wasmBinary`.
+    // We can't rely on Emscripten's built-in fetch path here: when this
+    // script is injected dynamically by flutter_rust_bridge's loader
+    // (rather than declared as a <script src=…> at parse time), browsers
+    // set `document.currentScript` to null inside the inlined glue, so
+    // Emscripten's `scriptDirectory` falls back to '' and the wasm request
+    // goes to the host root instead of `pkg/`. Pre-fetching sidesteps that
+    // entirely and also lets us honour the exact URL FRB asked for.
+    if (!moduleOrPath) {
+      return Promise.reject(new Error(
+        'nobodywho_flutter shim: expected opts.module_or_path'));
+    }
+    return fetch(moduleOrPath)
+      .then(function (resp) {
+        if (!resp.ok) {
+          throw new Error(
+            'nobodywho_flutter shim: failed to fetch ' + moduleOrPath +
+            ' (HTTP ' + resp.status + ')');
+        }
+        return resp.arrayBuffer();
+      })
+      .then(function (buf) { return factory({wasmBinary: new Uint8Array(buf)}); })
+      .then(function (mod) {
       // Expose every Emscripten export as a property on wasm_bindgen itself
       // so FRB's generated `@JS('wasm_bindgen')` binding can do
       // `wasm_bindgen.rust_arc_increment_…(ptr)` directly.
@@ -70,6 +86,19 @@
       return mod;
     });
   }
+
+  // Dart's `dart:js_interop` maps a declaration like
+  //     extension type _JSWasmBindgen(JSObject _) implements JSObject {
+  //       external JSPromise call(JSAny? arg);
+  //     }
+  // to JS `foo.call(x)`, which is `Function.prototype.call`: it sets
+  // `this = x` and passes no actual arguments. FRB uses exactly that
+  // extension type to invoke the loader, so the positional arg shows up as
+  // `thisArg` instead of `opts`. Overriding `.call` on our function lets us
+  // accept that calling convention without requiring a patch to FRB.
+  wasm_bindgen.call = function (thisArg) {
+    return wasm_bindgen(thisArg);
+  };
 
   globalScope.wasm_bindgen = wasm_bindgen;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -3637,11 +3666,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
           HEAP_DATA_VIEW.setInt32(arg0 + 4 * 0, ptr1, true);
       }
 
-  function ___wbg___wbindgen_is_falsy_c07bb72123e65555(arg0) {
-          const ret = !arg0;
-          return ret;
-      }
-
   function ___wbg___wbindgen_is_function_3baa9db1a987f47d(arg0) {
           const ret = typeof(arg0) === 'function';
           return ret;
@@ -3649,11 +3673,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
 
   function ___wbg___wbindgen_is_undefined_29a43b4d42920abd(arg0) {
           const ret = arg0 === undefined;
-          return ret;
-      }
-
-  function ___wbg___wbindgen_jsval_eq_d3465d8a07697228(arg0, arg1) {
-          const ret = arg0 === arg1;
           return ret;
       }
 
@@ -3845,10 +3864,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
           arg0.postMessage(arg1);
       }, arguments); }
 
-  function ___wbg_postMessage_2e8ce5e10ce05091() { return handleError(function (arg0, arg1, arg2) {
-          arg0.postMessage(arg1, arg2);
-      }, arguments); }
-
   function ___wbg_postMessage_59736484efc322cf() { return handleError(function (arg0, arg1) {
           arg0.postMessage(arg1);
       }, arguments); }
@@ -3874,14 +3889,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
   function ___wbg_resolve_e6c466bc1052f16c(arg0) {
           const ret = Promise.resolve(arg0);
           return ret;
-      }
-
-  function ___wbg_set_onerror_b785ebcd32c1528e(arg0, arg1) {
-          arg0.onerror = arg1;
-      }
-
-  function ___wbg_set_onmessage_9d59339e7810516a(arg0, arg1) {
-          arg0.onmessage = arg1;
       }
 
   
@@ -3915,11 +3922,6 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
 
   function ___wbg_then_8e16ee11f05e4827(arg0, arg1) {
           const ret = arg0.then(arg1);
-          return ret;
-      }
-
-  function ___wbg_unshift_951ea71d9d2dc660(arg0, arg1) {
-          const ret = arg0.unshift(arg1);
           return ret;
       }
 
@@ -3966,31 +3968,22 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
           return ret;
       }
 
-  function wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_(arg0, arg1, arg2) {
-      wasm.wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_(arg0, arg1, arg2);
+  function wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_(arg0, arg1, arg2) {
+      wasm.wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_(arg0, arg1, arg2);
   }
   function ___wbindgen_cast_0000000000000002(arg0, arg1) {
-          // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1901, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-          const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_);
+          // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1907, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+          const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_);
           return ret;
       }
 
-  function wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2(arg0, arg1, arg2) {
-      wasm.wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2(arg0, arg1, arg2);
-  }
-  function ___wbindgen_cast_0000000000000003(arg0, arg1) {
-          // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1901, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-          const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2);
-          return ret;
-      }
-
-  function ___wbindgen_cast_0000000000000004(arg0) {
+  function ___wbindgen_cast_0000000000000003(arg0) {
           // Cast intrinsic for `F64 -> Externref`.
           const ret = arg0;
           return ret;
       }
 
-  function ___wbindgen_cast_0000000000000005(arg0, arg1) {
+  function ___wbindgen_cast_0000000000000004(arg0, arg1) {
           // Cast intrinsic for `Ref(String) -> Externref`.
           const ret = getStringFromWasm0(arg0, arg1);
           return ret;
@@ -6550,13 +6543,13 @@ var _main,
   _llama_token_to_piece,
   _llama_detokenize,
   _frb_dart_opaque_rust2dart_decode,
-  _frb_dart_opaque_drop_thread_box_persistent_handle,
   _frb_rust_vec_u8_free,
   _frb_rust_vec_u8_new,
   _frb_rust_vec_u8_resize,
   _frb_dart_opaque_dart2rust_encode,
   _receive_transfer_closure,
   _wasm_start_callback,
+  _frb_dart_opaque_drop_thread_box_persistent_handle,
   ___wbg_workerpool_free,
   _workerpool_new,
   _workerpool_new_raw,
@@ -6749,8 +6742,7 @@ var _main,
   ___trap,
   __emscripten_stack_alloc,
   _wasm_bindgen__convert__closures_____invoke__h8a25c346f61547cc,
-  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_,
-  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2,
+  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_,
   ___wbindgen_malloc,
   ___wbindgen_realloc,
   ___wbindgen_free,
@@ -8097,13 +8089,13 @@ function assignWasmExports(wasmExports) {
   _llama_token_to_piece = Module['_llama_token_to_piece'] = wasmExports['llama_token_to_piece'];
   _llama_detokenize = Module['_llama_detokenize'] = wasmExports['llama_detokenize'];
   _frb_dart_opaque_rust2dart_decode = Module['_frb_dart_opaque_rust2dart_decode'] = wasmExports['frb_dart_opaque_rust2dart_decode'];
-  _frb_dart_opaque_drop_thread_box_persistent_handle = Module['_frb_dart_opaque_drop_thread_box_persistent_handle'] = wasmExports['frb_dart_opaque_drop_thread_box_persistent_handle'];
   _frb_rust_vec_u8_free = Module['_frb_rust_vec_u8_free'] = wasmExports['frb_rust_vec_u8_free'];
   _frb_rust_vec_u8_new = Module['_frb_rust_vec_u8_new'] = wasmExports['frb_rust_vec_u8_new'];
   _frb_rust_vec_u8_resize = Module['_frb_rust_vec_u8_resize'] = wasmExports['frb_rust_vec_u8_resize'];
   _frb_dart_opaque_dart2rust_encode = Module['_frb_dart_opaque_dart2rust_encode'] = wasmExports['frb_dart_opaque_dart2rust_encode'];
   _receive_transfer_closure = Module['_receive_transfer_closure'] = wasmExports['receive_transfer_closure'];
   _wasm_start_callback = Module['_wasm_start_callback'] = wasmExports['wasm_start_callback'];
+  _frb_dart_opaque_drop_thread_box_persistent_handle = Module['_frb_dart_opaque_drop_thread_box_persistent_handle'] = wasmExports['frb_dart_opaque_drop_thread_box_persistent_handle'];
   ___wbg_workerpool_free = Module['___wbg_workerpool_free'] = wasmExports['__wbg_workerpool_free'];
   _workerpool_new = Module['_workerpool_new'] = wasmExports['workerpool_new'];
   _workerpool_new_raw = Module['_workerpool_new_raw'] = wasmExports['workerpool_new_raw'];
@@ -8296,8 +8288,7 @@ function assignWasmExports(wasmExports) {
   ___trap = wasmExports['__trap'];
   __emscripten_stack_alloc = wasmExports['_emscripten_stack_alloc'];
   _wasm_bindgen__convert__closures_____invoke__h8a25c346f61547cc = Module['_wasm_bindgen__convert__closures_____invoke__h8a25c346f61547cc'] = wasmExports['wasm_bindgen__convert__closures_____invoke__h8a25c346f61547cc'];
-  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_ = Module['_wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_'] = wasmExports['wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212_'];
-  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2 = Module['_wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2'] = wasmExports['wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_7867593636035631212__2'];
+  _wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_ = Module['_wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_'] = wasmExports['wasm_bindgen__convert__closures_____invoke__hb67730d2cfed5a80___llvm_9072161399942692965_'];
   ___wbindgen_malloc = Module['___wbindgen_malloc'] = wasmExports['__wbindgen_malloc'];
   ___wbindgen_realloc = Module['___wbindgen_realloc'] = wasmExports['__wbindgen_realloc'];
   ___wbindgen_free = Module['___wbindgen_free'] = wasmExports['__wbindgen_free'];
@@ -8357,13 +8348,9 @@ var wasmImports = {
   /** @export */
   __wbg___wbindgen_debug_string_ab4b34d23d6778bd: ___wbg___wbindgen_debug_string_ab4b34d23d6778bd,
   /** @export */
-  __wbg___wbindgen_is_falsy_c07bb72123e65555: ___wbg___wbindgen_is_falsy_c07bb72123e65555,
-  /** @export */
   __wbg___wbindgen_is_function_3baa9db1a987f47d: ___wbg___wbindgen_is_function_3baa9db1a987f47d,
   /** @export */
   __wbg___wbindgen_is_undefined_29a43b4d42920abd: ___wbg___wbindgen_is_undefined_29a43b4d42920abd,
-  /** @export */
-  __wbg___wbindgen_jsval_eq_d3465d8a07697228: ___wbg___wbindgen_jsval_eq_d3465d8a07697228,
   /** @export */
   __wbg___wbindgen_number_get_c7f42aed0525c451: ___wbg___wbindgen_number_get_c7f42aed0525c451,
   /** @export */
@@ -8411,8 +8398,6 @@ var wasmImports = {
   /** @export */
   __wbg_postMessage_05c4f5b252fddf64: ___wbg_postMessage_05c4f5b252fddf64,
   /** @export */
-  __wbg_postMessage_2e8ce5e10ce05091: ___wbg_postMessage_2e8ce5e10ce05091,
-  /** @export */
   __wbg_postMessage_59736484efc322cf: ___wbg_postMessage_59736484efc322cf,
   /** @export */
   __wbg_prototypesetcall_a6b02eb00b0f4ce2: ___wbg_prototypesetcall_a6b02eb00b0f4ce2,
@@ -8424,10 +8409,6 @@ var wasmImports = {
   __wbg_queueMicrotask_f8819e5ffc402f36: ___wbg_queueMicrotask_f8819e5ffc402f36,
   /** @export */
   __wbg_resolve_e6c466bc1052f16c: ___wbg_resolve_e6c466bc1052f16c,
-  /** @export */
-  __wbg_set_onerror_b785ebcd32c1528e: ___wbg_set_onerror_b785ebcd32c1528e,
-  /** @export */
-  __wbg_set_onmessage_9d59339e7810516a: ___wbg_set_onmessage_9d59339e7810516a,
   /** @export */
   __wbg_stack_3b0d974bbf31e44f: ___wbg_stack_3b0d974bbf31e44f,
   /** @export */
@@ -8441,8 +8422,6 @@ var wasmImports = {
   /** @export */
   __wbg_then_8e16ee11f05e4827: ___wbg_then_8e16ee11f05e4827,
   /** @export */
-  __wbg_unshift_951ea71d9d2dc660: ___wbg_unshift_951ea71d9d2dc660,
-  /** @export */
   __wbindgen_cast_0000000000000001: ___wbindgen_cast_0000000000000001,
   /** @export */
   __wbindgen_cast_0000000000000002: ___wbindgen_cast_0000000000000002,
@@ -8450,8 +8429,6 @@ var wasmImports = {
   __wbindgen_cast_0000000000000003: ___wbindgen_cast_0000000000000003,
   /** @export */
   __wbindgen_cast_0000000000000004: ___wbindgen_cast_0000000000000004,
-  /** @export */
-  __wbindgen_cast_0000000000000005: ___wbindgen_cast_0000000000000005,
   /** @export */
   __wbindgen_init_externref_table: ___wbindgen_init_externref_table,
   /** @export */

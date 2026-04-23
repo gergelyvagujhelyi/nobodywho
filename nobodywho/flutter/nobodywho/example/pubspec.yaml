@@ -1,0 +1,26 @@
+name: nobodywho_example
+description: "Web smoke-test app for the nobodywho Flutter plugin."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # Path dependency so this example exercises the plugin as it sits in the
+  # workspace (not pub.dev). Touch `nobodywho`'s Dart bindings or rebuild
+  # the wasm and `flutter run -d chrome` here picks them up immediately.
+  nobodywho:
+    path: ../
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

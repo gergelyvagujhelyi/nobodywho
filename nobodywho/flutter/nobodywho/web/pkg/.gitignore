@@ -3,3 +3,4 @@
 #               --bin nobodywho_flutter_web --target wasm32-unknown-emscripten
 # and is copied here by `tool/prepare_web_assets.sh`. Not source-controlled.
 nobodywho_flutter_bg.wasm
+nobodywho_flutter_web.wasm
